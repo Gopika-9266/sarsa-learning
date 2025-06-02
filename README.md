@@ -38,56 +38,79 @@ def sarsa(env,
           min_epsilon=0.1,
           epsilon_decay_ratio=0.9,
           n_episodes=3000):
-
     nS, nA = env.observation_space.n, env.action_space.n
     pi_track = []
     Q = np.zeros((nS, nA), dtype=np.float64)
     Q_track = np.zeros((n_episodes, nS, nA), dtype=np.float64)
 
-    select_action = lambda state, Q, epsilon: np.argmax(Q[state]) if np.random.random() > epsilon else np.random.randint(len(Q[state]))
+    # Decay schedules for alpha and epsilon
+    alphas = decay_schedule(init_alpha,
+                           min_alpha,
+                           alpha_decay_ratio,
+                           n_episodes)
+    epsilons = decay_schedule(init_epsilon,
+                              min_epsilon,
+                              epsilon_decay_ratio,
+                              n_episodes)
 
-    alphas = decay_schedule(init_alpha, min_alpha, alpha_decay_ratio, n_episodes)
-    epsilons = decay_schedule(init_epsilon, min_epsilon, epsilon_decay_ratio, n_episodes)
+    # Function to select action using epsilon-greedy policy
+    select_action = lambda state, Q, epsilon: np.argmax(Q[state]) \
+        if np.random.random() > epsilon \
+        else np.random.randint(len(Q[state]))
 
     for e in tqdm(range(n_episodes), leave=False):
-        state, done = env.reset(), False
-        action = select_action(state, Q, epsilons[e])
+        state = env.reset() # Reset the environment for each episode
+        # In newer gymnasium versions, reset might return a tuple (state, info).
+        # We only need the state here.
+        if isinstance(state, tuple):
+            state = state[0]
+
+        action = select_action(state, Q, epsilons[e]) # Select the first action
+        done = False # Initialize done flag for the episode
 
         while not done:
-            next_state, reward, done, _ = env.step(action)
+            # Take a step in the environment
+            # Modify: Use try-except to handle both 4-tuple (older gym) and 5-tuple (newer gymnasium)
+            try:
+                next_state, reward, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated # Update the done flag for 5-tuple
+            except ValueError:
+                # If unpacking 5 fails, try unpacking 4 (older gym behavior)
+                next_state, reward, done, _ = env.step(action)
+                # The 'done' flag is directly available in the 4-tuple
+
+            # Select the next action using the same policy
             next_action = select_action(next_state, Q, epsilons[e])
 
-            td_target = reward + gamma * Q[next_state, np.argmax(Q[next_state])] * (1 - done)
-            td_error = td_target - Q[state, action]
-            Q[state, action] += alphas[e] * td_error
+            # SARSA update rule
+            # Use the updated 'done' flag in the TD target calculation
+            td_target = reward + gamma * Q[next_state][next_action] * (not done)
+            td_error = td_target - Q[state][action]
+            Q[state][action] = Q[state][action] + alphas[e] * td_error
 
+            # Update state and action for the next iteration
             state = next_state
             action = next_action
 
-        Q_track[e] = Q.copy()
+        # Store Q and policy track
+        Q_track[e] = Q
         pi_track.append(np.argmax(Q, axis=1))
 
+    # Calculate V and pi from the learned Q
     V = np.max(Q, axis=1)
-    pi = lambda s: np.argmax(Q[s])
+    pi = lambda s: {s:a for s, a in enumerate(np.argmax(Q, axis=1))}[s]
 
     return Q, V, pi, Q_track, pi_track
 ```
 
 ## OUTPUT:
-## value function
-![Screenshot 2025-05-14 153732](https://github.com/user-attachments/assets/c7e3853e-a8cc-481b-840d-b4952d39bdd5)
+![image](https://github.com/user-attachments/assets/137a4b71-fe38-483e-b896-4fb1a1c42178)
 
+![image](https://github.com/user-attachments/assets/05ba7be3-1723-4449-a7bd-838659199482)
 
-##  optimal policy.
-![image](https://github.com/user-attachments/assets/d71ddb2c-9a7e-4aab-8967-251c84e64c43)
+![image](https://github.com/user-attachments/assets/c1e92f8f-a8ac-4396-8774-b15e1798fd27)
 
-
-
-
-
-## Include plot comparing the state value functions of Monte Carlo method and SARSA learning.
-![Screenshot 2025-05-14 153747](https://github.com/user-attachments/assets/eaf4e876-7ffb-4541-b521-cc8a22daf2c0)
-![Screenshot 2025-05-14 153801](https://github.com/user-attachments/assets/943da442-945e-4e88-a23d-ab7e9e1779c4)
+![image](https://github.com/user-attachments/assets/c76b19ff-5ade-46ed-bfed-3fa330f0c816)
 
 
 ## RESULT:
